@@ -144,7 +144,7 @@ Peripheral changes go through the `.ioc` and regeneration — never by hand-edit
 | 1–2 | Clock tree 168 MHz, TIM6 timebase, NVIC priorities (EXTI0 = 5) | ✅ Done |
 | 1–2 | `FreeRTOSConfig.h` tick override in USER CODE block, survives regeneration | ✅ Done |
 | 1–2 | Blink test — LED on PD15, verified 10 kHz tick | ✅ Done |
-| 1–2 | Git repo initialised, pushed to GitHub | 🟡 In progress |
+| 1–2 | Git repo initialised, pushed to GitHub |✅ Done |
 | 3 | Copy `uart.c/h`, `motor.c/h`, `lis3dsh.c/h` into project | ⬜ |
 | 3 | New `main.c` — init all peripherals before `osKernelStart()` | ⬜ |
 | 4 | Build clean, resolve include/linker errors | ⬜ |

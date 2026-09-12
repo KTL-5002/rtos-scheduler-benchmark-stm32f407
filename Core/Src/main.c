@@ -26,7 +26,10 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "uart.h"
+#include "motor.h"
+#include "lis3dsh.h"
+#include "FreeRTOS.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -101,6 +104,30 @@ int main(void)
   led.Pull  = GPIO_NOPULL;
   led.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOD, &led);
+
+
+  /* DWT cycle counter — response time and overhead measurement */
+  CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+  DWT->CYCCNT = 0;
+  DWT->CTRL  |= DWT_CTRL_CYCCNTENA_Msk;
+
+  UART_Print("\r\n=== RTOS Benchmark: init ===\r\n");
+
+  /* Motor PWM — start channel, leave stopped */
+  HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3);
+  Motor_Set(MOTOR_STOP, 0);
+  UART_Print("Motor    OK\r\n");
+
+  /* Accelerometer — 200ms power-up and WHO_AM_I inside Init */
+  if (LIS3DSH_Init(&hspi1) != HAL_OK) {
+      UART_Print("LIS3DSH  FAIL\r\n");
+      Error_Handler();
+  }
+  UART_Print("LIS3DSH  OK\r\n");
+
+  UART_Printf("Tick rate: %lu Hz\r\n", (unsigned long)configTICK_RATE_HZ);
+  UART_Print("=== starting scheduler ===\r\n\r\n");
+
   /* USER CODE END 2 */
 
   /* Init scheduler */

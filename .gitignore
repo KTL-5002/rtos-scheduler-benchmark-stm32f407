@@ -1,0 +1,30 @@
+# Build output
+Debug/
+Release/
+*.o
+*.d
+*.su
+*.map
+*.elf
+*.bin
+*.hex
+*.list
+*.cyclo
+
+# CubeIDE workspace metadata
+.metadata/
+RemoteSystemsTempFiles/
+*.launch
+
+# Python analysis (Week 4)
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Raw experiment data - too large for git
+data/raw/
+
+# OS junk
+Thumbs.db
+.DS_Store

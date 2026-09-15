@@ -28,6 +28,8 @@
 #include "uart.h"
 #include "motor.h"
 #include "lis3dsh.h"
+#include "task_bodies.h"
+#include "scheduler.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -156,6 +158,7 @@ void MX_FREERTOS_Init(void) {
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
+  Scheduler_Init();
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -175,28 +178,7 @@ void StartDefaultTask(void *argument)
 {
   /* USER CODE BEGIN StartDefaultTask */
 
-	  LIS3DSH_Data_t accel;
-	  uint32_t cycle = 0;
-
-	  for(;;)
-	  {
-	    HAL_GPIO_TogglePin(GPIOD, GPIO_PIN_15);
-
-	    LIS3DSH_ReadXYZ(&accel);
-	    UART_Printf("X:%7.1f Y:%7.1f Z:%7.1f mg | btn:%lu\r\n",
-	                accel.x_mg, accel.y_mg, accel.z_mg,
-	                (unsigned long)btn_count);
-
-	    switch (cycle % 4) {
-	      case 0: Motor_Set(MOTOR_FORWARD, 60); UART_Print("  -> FORWARD 60%\r\n"); break;
-	      case 1: Motor_Set(MOTOR_STOP,     0); UART_Print("  -> STOP\r\n");        break;
-	      case 2: Motor_Set(MOTOR_REVERSE, 60); UART_Print("  -> REVERSE 60%\r\n"); break;
-	      case 3: Motor_Set(MOTOR_STOP,     0); UART_Print("  -> STOP\r\n");        break;
-	    }
-	    cycle++;
-
-	    osDelay(pdMS_TO_TICKS(2000));
-	  }
+	  ReporterTaskBody(NULL);
   /* USER CODE END StartDefaultTask */
 }
 

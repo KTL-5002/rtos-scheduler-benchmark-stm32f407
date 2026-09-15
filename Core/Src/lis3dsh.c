@@ -71,7 +71,6 @@ HAL_StatusTypeDef LIS3DSH_Init(SPI_HandleTypeDef *hspi)
 void LIS3DSH_ReadXYZ(LIS3DSH_Data_t *data)
 {
     uint8_t raw[6];
-    HAL_Delay(10);
 
     ReadBurst(LIS3DSH_OUT_X_L, raw, 6);
 

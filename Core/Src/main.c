@@ -30,6 +30,10 @@
 #include "motor.h"
 #include "lis3dsh.h"
 #include "FreeRTOS.h"
+#include "workload.h"
+#include "workload.h"
+#include "metrics.h"
+#include "scheduler.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -126,7 +130,30 @@ int main(void)
   UART_Print("LIS3DSH  OK\r\n");
 
   UART_Printf("Tick rate: %lu Hz\r\n", (unsigned long)configTICK_RATE_HZ);
+
+
+  /* Workload calibration check */
+  UART_Print("--- burn calibration ---\r\n");
+  UART_Printf("  req 100us -> %lu us\r\n", (unsigned long)Workload_MeasureBurn(100));
+  UART_Printf("  req 1000us -> %lu us\r\n", (unsigned long)Workload_MeasureBurn(1000));
+  UART_Printf("  req 5000us -> %lu us\r\n", (unsigned long)Workload_MeasureBurn(5000));
+  UART_Printf("  real task U = %d%%\r\n", (int)(Workload_GetRealUtilization() * 100));
+
+  Metrics_Init();
+  Workload_SetTargetUtilization(0.60f);   /* 60% — safe starting point */
+  UART_Print("Workload set to U=60%\r\n");
+  UART_Print("--- accel timing ---\r\n");
+  {
+    LIS3DSH_Data_t d;
+    for (int i = 0; i < 5; i++) {
+      uint32_t t0 = DWT->CYCCNT;
+      LIS3DSH_ReadXYZ(&d);
+      uint32_t us = (DWT->CYCCNT - t0) / (SystemCoreClock / 1000000U);
+      UART_Printf("  read %d: %lu us\r\n", i, (unsigned long)us);
+    }
+  }
   UART_Print("=== starting scheduler ===\r\n\r\n");
+
 
   /* USER CODE END 2 */
 

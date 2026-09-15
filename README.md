@@ -144,9 +144,9 @@ Peripheral changes go through the `.ioc` and regeneration — never by hand-edit
 | 1–2 | Clock tree 168 MHz, TIM6 timebase, NVIC priorities (EXTI0 = 5) | ✅ Done |
 | 1–2 | `FreeRTOSConfig.h` tick override in USER CODE block, survives regeneration | ✅ Done |
 | 1–2 | Blink test — LED on PD15, verified 10 kHz tick | ✅ Done |
-| 1–2 | Git repo initialised, pushed to GitHub |✅ Done |
-| 3 | Copy `uart.c/h`, `motor.c/h`, `lis3dsh.c/h` into project | ⬜ |
-| 3 | New `main.c` — init all peripherals before `osKernelStart()` | ⬜ |
+| 1–2 | Git repo initialised, pushed to GitHub | ✅ Done |
+| 3 | Copy `uart.c/h`, `motor.c/h`, `lis3dsh.c/h` into project | ✅ Done|
+| 3 | New `main.c` — init all peripherals before `osKernelStart()` | ✅ Done |
 | 4 | Build clean, resolve include/linker errors | ⬜ |
 | 4 | Verify each peripheral standalone in combined project | ⬜ |
 | 5 | Task set: 2 real + synthetic; add `task_config.h`, `workload.h/c` | ⬜ |
@@ -173,7 +173,7 @@ Peripheral changes go through the `.ioc` and regeneration — never by hand-edit
 | 3–4 | Verify dynamic priority changes are occurring (log transitions over UART) | ⬜ |
 | 5 | `metrics.c` — packet format, DWT timing, miss logging | ⬜ |
 | 5 | Clean timing data out over UART for both schedulers at one utilization point | ⬜ |
-| — | Measure bare tick-hook cost with DWT before adding load | ⬜ |
+DOnd| — | Measure bare tick-hook cost with DWT before adding load | ⬜ |
 | — | Weekend buffer | ⬜ |
 
 ---

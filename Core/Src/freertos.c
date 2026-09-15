@@ -25,7 +25,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "uart.h"
+#include "motor.h"
+#include "lis3dsh.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -51,9 +53,10 @@
 osThreadId_t defaultTaskHandle;
 const osThreadAttr_t defaultTask_attributes = {
   .name = "defaultTask",
-  .stack_size = 128 * 4,
+  .stack_size = 512 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
+volatile uint32_t btn_count = 0;
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
@@ -172,17 +175,43 @@ void StartDefaultTask(void *argument)
 {
   /* USER CODE BEGIN StartDefaultTask */
 
-  /* Infinite loop */
-  for(;;)
-  {
-	 HAL_GPIO_TogglePin(GPIOD, GPIO_PIN_15);
-	 osDelay(pdMS_TO_TICKS(2000));
-  }
+	  LIS3DSH_Data_t accel;
+	  uint32_t cycle = 0;
+
+	  for(;;)
+	  {
+	    HAL_GPIO_TogglePin(GPIOD, GPIO_PIN_15);
+
+	    LIS3DSH_ReadXYZ(&accel);
+	    UART_Printf("X:%7.1f Y:%7.1f Z:%7.1f mg | btn:%lu\r\n",
+	                accel.x_mg, accel.y_mg, accel.z_mg,
+	                (unsigned long)btn_count);
+
+	    switch (cycle % 4) {
+	      case 0: Motor_Set(MOTOR_FORWARD, 60); UART_Print("  -> FORWARD 60%\r\n"); break;
+	      case 1: Motor_Set(MOTOR_STOP,     0); UART_Print("  -> STOP\r\n");        break;
+	      case 2: Motor_Set(MOTOR_REVERSE, 60); UART_Print("  -> REVERSE 60%\r\n"); break;
+	      case 3: Motor_Set(MOTOR_STOP,     0); UART_Print("  -> STOP\r\n");        break;
+	    }
+	    cycle++;
+
+	    osDelay(pdMS_TO_TICKS(2000));
+	  }
   /* USER CODE END StartDefaultTask */
 }
 
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
-
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+    if (GPIO_Pin == GPIO_PIN_0) {
+        static uint32_t last = 0;
+        uint32_t now = HAL_GetTick();
+        if ((now - last) > 200) {
+            last = now;
+            btn_count++;
+        }
+    }
+}
 /* USER CODE END Application */
 

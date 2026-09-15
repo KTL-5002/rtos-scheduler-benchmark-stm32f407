@@ -152,7 +152,7 @@ int main(void)
       UART_Printf("  read %d: %lu us\r\n", i, (unsigned long)us);
     }
   }
-  UART_Print("=== starting scheduler ===\r\n\r\n");
+  UART_Print("=== starting scheduler =========\r\n\r\n");
 
 
   /* USER CODE END 2 */

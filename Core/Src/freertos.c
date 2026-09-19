@@ -56,7 +56,7 @@ osThreadId_t defaultTaskHandle;
 const osThreadAttr_t defaultTask_attributes = {
   .name = "defaultTask",
   .stack_size = 512 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
+  .priority = (osPriority_t) osPriorityIdle,
 };
 volatile uint32_t btn_count = 0;
 
@@ -91,14 +91,7 @@ void vApplicationIdleHook( void )
 /* USER CODE END 2 */
 
 /* USER CODE BEGIN 3 */
-void vApplicationTickHook( void )
-{
-   /* This function will be called by each tick interrupt if
-   configUSE_TICK_HOOK is set to 1 in FreeRTOSConfig.h. User code can be
-   added here, but the tick hook is called from an interrupt context, so
-   code must not attempt to block, and only the interrupt safe FreeRTOS API
-   functions can be used (those that end in FromISR()). */
-}
+/*Defined in scheduler_dms.c/scheduler_edf.c */
 /* USER CODE END 3 */
 
 /* USER CODE BEGIN 4 */

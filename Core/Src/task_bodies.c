@@ -7,6 +7,7 @@
 #include "uart.h"
 #include "FreeRTOS.h"
 #include "task.h"
+#include "scheduler.h"
 
 /* Motor control — critical task, D < T */
 void MotorTaskBody(void *argument)
@@ -25,6 +26,7 @@ void MotorTaskBody(void *argument)
         Workload_BurnCycles(scaled_wcet_cycles[id]);
 
         Metrics_RecordCompletion(id, release, DWT->CYCCNT);
+        Scheduler_JobComplete(id);
         vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(task_set[id].period_ms));
     }
 }
@@ -71,9 +73,12 @@ void ReporterTaskBody(void *argument)
     (void)argument;
     TickType_t last_wake = xTaskGetTickCount();
 
+    UART_Printf("reporter prio = %lu\r\n",(unsigned long)uxTaskPriorityGet(NULL));
+
     for (;;) {
         vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(5000));
-        Metrics_Print();
+        Metrics_Print();              /* your existing line — leave as is */
+        Scheduler_PrintOverhead();    /* the only addition */
         HAL_GPIO_TogglePin(GPIOD, GPIO_PIN_15);
     }
 }

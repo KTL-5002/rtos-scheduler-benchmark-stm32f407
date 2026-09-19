@@ -6,7 +6,7 @@
 /* Scheduler selection */
 #define SCHED_DMS          1
 #define SCHED_EDF          2
-#define ACTIVE_SCHEDULER   SCHED_DMS
+#define ACTIVE_SCHEDULER   SCHED_EDF
 
 #define NUM_TASKS          5
 #define TASK_STACK_WORDS   512     /* words, for xTaskCreate */

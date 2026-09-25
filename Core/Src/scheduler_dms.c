@@ -15,6 +15,7 @@ static TaskHandle_t task_handles[NUM_TASKS];
 
 void Scheduler_Init(void)
 {
+	UART_Printf("\r\nscheduler=%s  built %s %s\r\n", Scheduler_Name(), __DATE__, __TIME__);
     uint8_t order[NUM_TASKS];
 
     for (uint8_t i = 0; i < NUM_TASKS; i++) order[i] = i;
@@ -64,5 +65,10 @@ void Scheduler_Init(void)
     }
     UART_Print("-------------------------------\r\n\r\n");
 }
+void        vApplicationTickHook(void)  { }
+TickType_t  Scheduler_GetBaseTick(void) { return 0; }
+const char *Scheduler_Name(void)        { return "DMS"; }
+void        Scheduler_PrintOverhead(void) { UART_Printf("--- DMS: no scheduler overhead ---\r\n"); }
+void Scheduler_JobComplete(uint32_t id) { (void)id; }
 
 #endif /* ACTIVE_SCHEDULER == SCHED_DMS */

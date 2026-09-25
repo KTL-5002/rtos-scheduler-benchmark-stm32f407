@@ -7,6 +7,7 @@
 #include "uart.h"
 #include "FreeRTOS.h"
 #include "task.h"
+#include "scheduler.h"
 
 /* Motor control — critical task, D < T */
 void MotorTaskBody(void *argument)
@@ -14,17 +15,18 @@ void MotorTaskBody(void *argument)
     uint32_t id = (uint32_t)argument;
     TickType_t last_wake = xTaskGetTickCount();
     uint8_t speed = 40;
+    uint32_t job = 0;
 
     for (;;) {
         uint32_t release = DWT->CYCCNT;
 
-        Motor_Set(MOTOR_FORWARD, speed);
+        Motor_Dir_t dir = ((job++ / 200) & 1) ? MOTOR_REVERSE : MOTOR_FORWARD;
+        Motor_Set(dir, speed);
 
-        /* Pad to nominal WCET so utilization is as specified.
-           Replace with measured value once characterised. */
         Workload_BurnCycles(scaled_wcet_cycles[id]);
 
         Metrics_RecordCompletion(id, release, DWT->CYCCNT);
+        Scheduler_JobComplete(id);
         vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(task_set[id].period_ms));
     }
 }
@@ -71,9 +73,12 @@ void ReporterTaskBody(void *argument)
     (void)argument;
     TickType_t last_wake = xTaskGetTickCount();
 
+    UART_Printf("reporter prio = %lu\r\n",(unsigned long)uxTaskPriorityGet(NULL));
+
     for (;;) {
         vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(5000));
-        Metrics_Print();
+        Metrics_Print();              /* your existing line — leave as is */
+        Scheduler_PrintOverhead();    /* the only addition */
         HAL_GPIO_TogglePin(GPIOD, GPIO_PIN_15);
     }
 }

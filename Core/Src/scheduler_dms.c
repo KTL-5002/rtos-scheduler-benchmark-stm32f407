@@ -66,7 +66,7 @@ void Scheduler_Init(void)
     UART_Print("-------------------------------\r\n\r\n");
 }
 void        vApplicationTickHook(void)  { }
-TickType_t  Scheduler_GetBaseTick(void) { return 0; }
+TickType_t  Scheduler_GetBaseTick(void) { return (TickType_t)RELEASE_START_TICK; }
 const char *Scheduler_Name(void)        { return "DMS"; }
 void        Scheduler_PrintOverhead(void) { UART_Printf("--- DMS: no scheduler overhead ---\r\n"); }
 void Scheduler_JobComplete(uint32_t id) { (void)id; }

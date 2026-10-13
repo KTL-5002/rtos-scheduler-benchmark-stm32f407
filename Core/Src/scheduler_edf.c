@@ -44,15 +44,23 @@ static TaskHandle_t        edf_task[NUM_TASKS];
 static TaskHandle_t        edf_manager = NULL;
 
 static volatile TickType_t edf_next_release[NUM_TASKS];
-static volatile TickType_t edf_abs_deadline[NUM_TASKS];
+
+/* Job accounting. A task has a pending job whenever released > completed.
+ * The job it is working on is always the OLDEST pending one, whose
+ * absolute deadline follows from how many jobs have completed:
+ *     base + completed * T + D
+ * This stays correct under overload, when a task is still finishing an
+ * old job after its next release has already happened. The old scheme
+ * (overwrite the deadline at release, clear a flag at completion) gave a
+ * late job the NEXT job's deadline and marked a task that still had a
+ * pending job as inactive. */
+static volatile uint32_t   edf_released[NUM_TASKS];
+static volatile uint32_t   edf_completed[NUM_TASKS];
 
 static TickType_t          edf_period_ticks[NUM_TASKS];
 static TickType_t          edf_deadline_ticks[NUM_TASKS];
 
-static volatile uint8_t edf_job_active[NUM_TASKS];
-
-#define EDF_BASE_TICK  ((TickType_t)0)
-
+#define EDF_BASE_TICK  ((TickType_t)RELEASE_START_TICK)
 /* ------------------------------------------------------ overhead counters */
 
 volatile uint32_t edf_hook_calls      = 0;
@@ -87,9 +95,8 @@ void vApplicationTickHook(void)
         /* signed difference so TickType_t wraparound is handled */
         if ((int32_t)(now - edf_next_release[i]) >= 0)
         {
-            edf_abs_deadline[i] = edf_next_release[i] + edf_deadline_ticks[i];
-            edf_next_release[i] = edf_next_release[i] + edf_period_ticks[i];
-            edf_job_active[i]   = 1;                     /* <-- add */
+            edf_next_release[i] += edf_period_ticks[i];
+            edf_released[i]++;
             released = pdTRUE;
         }
     }
@@ -131,8 +138,11 @@ static void EDF_ManagerBody(void *argument)
         taskENTER_CRITICAL();
         for (uint32_t i = 0; i < NUM_TASKS; i++)
         {
-            dl[i]  = edf_abs_deadline[i];
-            act[i] = edf_job_active[i];
+            uint32_t rel = edf_released[i];
+            uint32_t cmp = edf_completed[i];
+            act[i] = (rel != cmp);
+            dl[i]  = EDF_BASE_TICK + (TickType_t)cmp * edf_period_ticks[i]
+                                   + edf_deadline_ticks[i];
             idx[i] = (uint8_t)i;
         }
         taskEXIT_CRITICAL();
@@ -203,15 +213,20 @@ const char *Scheduler_Name(void)
     return "EDF";
 }
 
-/* Called by each task body when a job finishes. Clears the active flag so
- * the task stops competing for priority until its next release, and pokes
- * the manager to re-sort. Without this, a finished task keeps a stale
- * past-due deadline and sorts ahead of everything. */
+/* Called by each task body when a job finishes (task context).
+ * Normally the task then blocks until its next release and nothing else
+ * is needed. If its next job has ALREADY been released (overload), the
+ * task runs straight on into it with a new, later deadline, so the
+ * manager must re-sort now rather than wait for the next release event. */
 void Scheduler_JobComplete(uint32_t id)
 {
-    if (id < NUM_TASKS)
+    if (id >= NUM_TASKS) return;
+
+    edf_completed[id]++;
+
+    if (edf_released[id] != edf_completed[id] && edf_manager != NULL)
     {
-        edf_job_active[id] = 0;
+        xTaskNotifyGive(edf_manager);
     }
 }
 void Scheduler_Init(void)
@@ -221,7 +236,8 @@ void Scheduler_Init(void)
         edf_period_ticks[i]   = pdMS_TO_TICKS(task_set[i].period_ms);
         edf_deadline_ticks[i] = pdMS_TO_TICKS(task_set[i].deadline_ms);
         edf_next_release[i]   = EDF_BASE_TICK;
-        edf_abs_deadline[i]   = EDF_BASE_TICK + edf_deadline_ticks[i];
+        edf_released[i]       = 0;
+        edf_completed[i]      = 0;
     }
 
     /* Initial priorities = shortest relative deadline first. The manager

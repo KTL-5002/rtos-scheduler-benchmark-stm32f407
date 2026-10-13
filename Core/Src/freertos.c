@@ -59,6 +59,7 @@ const osThreadAttr_t defaultTask_attributes = {
   .priority = (osPriority_t) osPriorityIdle,
 };
 volatile uint32_t btn_count = 0;
+volatile uint32_t idle_counter = 0;
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
@@ -87,6 +88,7 @@ void vApplicationIdleHook( void )
    important that vApplicationIdleHook() is permitted to return to its calling
    function, because it is the responsibility of the idle task to clean up
    memory allocated by the kernel to any task that has since been deleted. */
+   idle_counter++;
 }
 /* USER CODE END 2 */
 

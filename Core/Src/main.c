@@ -131,7 +131,8 @@ int main(void)
 
   UART_Printf("Tick rate: %lu Hz\r\n", (unsigned long)configTICK_RATE_HZ);
 
-
+  Workload_Calibrate();
+  UART_Printf("  cyc/iter (Q16) = %lu\r\n", (unsigned long)Workload_GetCyclesPerIterQ16());
   /* Workload calibration check */
   UART_Print("--- burn calibration ---\r\n");
   UART_Printf("  req 100us -> %lu us\r\n", (unsigned long)Workload_MeasureBurn(100));
@@ -140,8 +141,9 @@ int main(void)
   UART_Printf("  real task U = %d%%\r\n", (int)(Workload_GetRealUtilization() * 100));
 
   Metrics_Init();
-  Workload_SetTargetUtilization(0.60f);   /* 60% — safe starting point */
-  UART_Print("Workload set to U=60%\r\n");
+  float target_u = 1.10f;
+  Workload_SetTargetUtilization(target_u);
+  UART_Printf("Workload set to U=%lu%%\r\n", (unsigned long)(target_u * 100.0f));
   UART_Print("--- accel timing ---\r\n");
   {
     LIS3DSH_Data_t d;
@@ -152,6 +154,9 @@ int main(void)
       UART_Printf("  read %d: %lu us\r\n", i, (unsigned long)us);
     }
   }
+  UART_Printf("CYCLES_PER_TICK = %lu, SystemCoreClock = %lu\r\n",
+              (unsigned long)CYCLES_PER_TICK,
+              (unsigned long)SystemCoreClock);
   UART_Print("=== starting scheduler =========\r\n\r\n");
 
 

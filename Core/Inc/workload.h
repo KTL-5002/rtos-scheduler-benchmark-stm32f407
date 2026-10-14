@@ -1,11 +1,12 @@
 #ifndef WORKLOAD_H
 #define WORKLOAD_H
-#define CYCLES_PER_TICK   (168000000U / 10000U)   /* = 16800 */
 
 #include <stdint.h>
 #include "task_config.h"
 
-extern uint32_t scaled_wcet_cycles[NUM_TASKS];
+#define CYCLES_PER_TICK   (168000000U / 10000U)   /* = 16800 */
+
+extern uint32_t scaled_wcet_cycles[MAX_TASKS];
 
 void     Workload_BurnCycles(uint32_t cycles);
 void     Workload_BurnUs(uint32_t us);

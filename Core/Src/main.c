@@ -31,9 +31,9 @@
 #include "lis3dsh.h"
 #include "FreeRTOS.h"
 #include "workload.h"
-#include "workload.h"
 #include "metrics.h"
 #include "scheduler.h"
+#include "sweep.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -141,9 +141,8 @@ int main(void)
   UART_Printf("  real task U = %d%%\r\n", (int)(Workload_GetRealUtilization() * 100));
 
   Metrics_Init();
-  float target_u = 1.10f;
-  Workload_SetTargetUtilization(target_u);
-  UART_Printf("Workload set to U=%lu%%\r\n", (unsigned long)(target_u * 100.0f));
+  SweepPoint_t pt = Sweep_Begin();          /* picks task set, scheduler, U, trial */
+  Workload_SetTargetUtilization(pt.u);
   UART_Print("--- accel timing ---\r\n");
   {
     LIS3DSH_Data_t d;

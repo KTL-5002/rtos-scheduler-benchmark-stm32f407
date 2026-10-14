@@ -1,7 +1,7 @@
 #include "workload.h"
 #include "stm32f4xx_hal.h"
 
-uint32_t scaled_wcet_cycles[NUM_TASKS];
+uint32_t scaled_wcet_cycles[MAX_TASKS];
 
 /* ------------------------------------------------------------------
  * CPU-time burn
@@ -14,8 +14,10 @@ uint32_t scaled_wcet_cycles[NUM_TASKS];
  *
  * This version spins a fixed number of loop iterations. Iterations only
  * advance while this task is actually running, so a preempted job is
- * stretched by exactly the time it lost. The cycles->iterations ratio
- * is measured at boot by Workload_Calibrate().
+ * stretched by exactly the time it lost - which is what response time
+ * is supposed to measure. The cycles->iterations ratio is measured at
+ * boot by Workload_Calibrate(), so it is exact for this build and
+ * optimisation level.
  * ------------------------------------------------------------------ */
 
 /* Calibrated cost of one spin iteration, in CPU cycles, Q16 fixed point. */
@@ -33,7 +35,8 @@ static void __attribute__((noinline)) Workload_Spin(uint32_t n)
         : "cc");
 }
 
-/* Call ONCE, after DWT is enabled and BEFORE osKernelStart(). */
+/* Call ONCE, after DWT is enabled and BEFORE osKernelStart().
+   Interrupts are masked so nothing inflates the measurement. */
 void Workload_Calibrate(void)
 {
     const uint32_t N = 1000000u;
@@ -78,7 +81,8 @@ float Workload_GetRealUtilization(void)
     return u;
 }
 
-/* Scale synthetic WCETs so total utilization hits target_u. */
+/* Scale synthetic WCETs so total utilization hits target_u.
+   Task set structure is unchanged — only load varies. */
 void Workload_SetTargetUtilization(float target_u)
 {
     float u_real  = 0.0f;
@@ -90,8 +94,8 @@ void Workload_SetTargetUtilization(float target_u)
         else                          u_real  += u;
     }
 
-    float scale = (target_u - u_real) / u_synth;
-    if (scale < 0.0f) scale = 0.0f;
+    float scale = (u_synth > 0.0f) ? (target_u - u_real) / u_synth : 0.0f;
+    if (scale < 0.0f) scale = 0.0f;   /* target below the fixed floor */
 
     for (int i = 0; i < NUM_TASKS; i++) {
         uint32_t c = task_set[i].wcet_us;
@@ -102,7 +106,9 @@ void Workload_SetTargetUtilization(float target_u)
     }
 }
 
-/* Calibration check (call before the scheduler starts). Should match ~1%. */
+/* Calibration check: returns actual elapsed microseconds for a requested
+   burn. Only meaningful when nothing can preempt (call before the
+   scheduler starts). Should match within ~1%. */
 uint32_t Workload_MeasureBurn(uint32_t requested_us)
 {
     uint32_t t0 = DWT->CYCCNT;

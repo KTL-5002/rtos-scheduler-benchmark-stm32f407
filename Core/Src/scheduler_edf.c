@@ -1,10 +1,8 @@
 /* =========================================================================
  * scheduler_edf.c — Earliest Deadline First for FreeRTOS on STM32F407
  *
- * NOTE: task_config.h MUST be included before the ACTIVE_SCHEDULER guard,
- * because that macro is defined there. If the include is missing the whole
- * file compiles to nothing and you get link errors for Scheduler_Init()
- * rather than an obvious diagnostic.
+ * Compiled in every build; selected at runtime via Scheduler_Select()
+ * (see scheduler.c). Public entry points are EDF_*.
  *
  * Design rationale:
  *   Absolute deadlines change only at job release instants, so the 10 kHz
@@ -16,13 +14,16 @@
  *   notified from the hook, sorts the table, and writes new priorities.
  *   It runs once per release event (~every 10 ms here), not once per tick.
  *
- *   Priority mapping is EXACT for 5 tasks: earliest absolute deadline gets
- *   the highest priority. No bucket approximation is involved.
+ *   Priority mapping is EXACT: every task gets its own priority level
+ *   (2 .. 1+N, up to N = 50 within configMAX_PRIORITIES = 56), earliest
+ *   absolute deadline highest. No bucket approximation is involved.
+ *
+ *   Cost grows with N: the hook scans all N tasks every tick, and the
+ *   manager's insertion sort is O(N^2) per release event. Measuring that
+ *   growth is part of the task-count experiment.
  * ========================================================================= */
 
-#include "task_config.h"        /* defines ACTIVE_SCHEDULER — must come first */
-
-#if ACTIVE_SCHEDULER == SCHED_EDF
+#include "task_config.h"
 
 #include "scheduler.h"
 #include "FreeRTOS.h"
@@ -34,33 +35,34 @@
 /* ---------------------------------------------------------------- config */
 
 #define EDF_BASE_PRIORITY     2u
-#define EDF_MANAGER_PRIORITY  (EDF_BASE_PRIORITY + NUM_TASKS)   /* = 7 */
-#define MANAGER_STACK_WORDS   192u
+#define EDF_MANAGER_PRIORITY  (EDF_BASE_PRIORITY + MAX_TASKS)   /* = 52: above every task, below the reporter (55) */
+#define MANAGER_STACK_WORDS   256u
 
 
 /* ----------------------------------------------------------------- state */
 
-static TaskHandle_t        edf_task[NUM_TASKS];
+static TaskHandle_t        edf_task[MAX_TASKS];
 static TaskHandle_t        edf_manager = NULL;
 
-static volatile TickType_t edf_next_release[NUM_TASKS];
+static volatile TickType_t edf_next_release[MAX_TASKS];
 
 /* Job accounting. A task has a pending job whenever released > completed.
  * The job it is working on is always the OLDEST pending one, whose
  * absolute deadline follows from how many jobs have completed:
  *     base + completed * T + D
  * This stays correct under overload, when a task is still finishing an
- * old job after its next release has already happened. The old scheme
- * (overwrite the deadline at release, clear a flag at completion) gave a
- * late job the NEXT job's deadline and marked a task that still had a
+ * old job after its next release has already happened — the old
+ * "overwrite the deadline at release, clear a flag at completion" scheme
+ * gave a late job the NEXT job's deadline and marked a task with a
  * pending job as inactive. */
-static volatile uint32_t   edf_released[NUM_TASKS];
-static volatile uint32_t   edf_completed[NUM_TASKS];
+static volatile uint32_t   edf_released[MAX_TASKS];
+static volatile uint32_t   edf_completed[MAX_TASKS];
 
-static TickType_t          edf_period_ticks[NUM_TASKS];
-static TickType_t          edf_deadline_ticks[NUM_TASKS];
+static TickType_t          edf_period_ticks[MAX_TASKS];
+static TickType_t          edf_deadline_ticks[MAX_TASKS];
 
 #define EDF_BASE_TICK  ((TickType_t)RELEASE_START_TICK)
+
 /* ------------------------------------------------------ overhead counters */
 
 volatile uint32_t edf_hook_calls      = 0;
@@ -72,6 +74,23 @@ volatile uint32_t edf_recompute_acc   = 0;
 volatile uint32_t edf_recompute_max   = 0;
 volatile uint32_t edf_prio_writes     = 0;
 
+/* Priority-update delay: from the moment an event is DETECTED (a release in
+ * the tick hook, or a backlogged job found in EDF_JobComplete) to the moment
+ * the manager has FINISHED writing the new priorities. Events that arrive
+ * while one is already pending are folded into it, so each update is timed
+ * from its oldest unserved event. This is elapsed time; the manager's own
+ * CPU time comes from FreeRTOS run-time stats (EDF_ManagerCpuCycles). */
+static volatile uint32_t edf_detect_cyc     = 0;
+static volatile uint8_t  edf_detect_pending = 0;
+
+volatile uint32_t edf_upd_n   = 0;
+volatile uint64_t edf_upd_acc = 0;          /* cycles */
+volatile uint32_t edf_upd_max = 0;          /* cycles */
+volatile uint32_t edf_upd_hist[UPD_BINS];   /* see UPD_BIN_EDGES_US */
+const uint16_t UPD_BIN_EDGES_US[UPD_BINS - 1] = { 2, 5, 10, 20, 50, 100, 200, 500, 1000 };
+
+static uint32_t edf_mgr_rt0 = 0;            /* manager run time at window start */
+
 /* Bring-up stages — see notes. Enable one at a time.
  *   1 = DWT bracket only (measure bare hook cost)
  *   2 = full hook + manager, but no priority writes
@@ -82,7 +101,7 @@ volatile uint32_t edf_prio_writes     = 0;
 /*  TICK HOOK — ISR context, 10 kHz. Keep short.                         */
 /* ===================================================================== */
 
-void vApplicationTickHook(void)
+void EDF_TickHook(void)
 {
     uint32_t t0 = DWT->CYCCNT;
 
@@ -104,6 +123,7 @@ void vApplicationTickHook(void)
     if (released && (edf_manager != NULL))
     {
         BaseType_t higher_woken = pdFALSE;
+        if (!edf_detect_pending) { edf_detect_pending = 1; edf_detect_cyc = t0; }
         edf_release_events++;
         vTaskNotifyGiveFromISR(edf_manager, &higher_woken);
         portYIELD_FROM_ISR(higher_woken);
@@ -130,18 +150,22 @@ static void EDF_ManagerBody(void *argument)
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
         uint32_t   t0 = DWT->CYCCNT;
-        TickType_t dl[NUM_TASKS];
-        uint8_t    idx[NUM_TASKS];
-        uint8_t    act[NUM_TASKS];
+        TickType_t dl[MAX_TASKS];
+        uint8_t    idx[MAX_TASKS];
+        uint8_t    act[MAX_TASKS];
 
         /* snapshot only — the sort must not run with ticks masked */
         taskENTER_CRITICAL();
+        uint8_t  had_event = edf_detect_pending;
+        uint32_t det_cyc   = edf_detect_cyc;
+        edf_detect_pending = 0;                 /* later events start a new update */
         for (uint32_t i = 0; i < NUM_TASKS; i++)
         {
             uint32_t rel = edf_released[i];
             uint32_t cmp = edf_completed[i];
             act[i] = (rel != cmp);
-            dl[i]  = EDF_BASE_TICK + (TickType_t)cmp * edf_period_ticks[i]
+            dl[i]  = EDF_BASE_TICK + pdMS_TO_TICKS(task_offset_ms[i])
+                                   + (TickType_t)cmp * edf_period_ticks[i]
                                    + edf_deadline_ticks[i];
             idx[i] = (uint8_t)i;
         }
@@ -191,10 +215,23 @@ static void EDF_ManagerBody(void *argument)
         xTaskResumeAll();
 #endif
 
-        uint32_t d = DWT->CYCCNT - t0;
+        uint32_t t1 = DWT->CYCCNT;
+        uint32_t d  = t1 - t0;
         edf_recompute_count++;
         edf_recompute_acc += d;
         if (d > edf_recompute_max) edf_recompute_max = d;
+
+        if (had_event)
+        {
+            uint32_t delay = t1 - det_cyc;
+            uint32_t us    = delay / (SystemCoreClock / 1000000U);
+            uint32_t b     = 0;
+            while (b < UPD_BINS - 1 && us >= UPD_BIN_EDGES_US[b]) b++;
+            edf_upd_hist[b]++;
+            edf_upd_n++;
+            edf_upd_acc += delay;
+            if (delay > edf_upd_max) edf_upd_max = delay;
+        }
     }
 }
 #endif
@@ -203,22 +240,12 @@ static void EDF_ManagerBody(void *argument)
 /*  PUBLIC INTERFACE                                                     */
 /* ===================================================================== */
 
-TickType_t Scheduler_GetBaseTick(void)
-{
-    return EDF_BASE_TICK;
-}
-
-const char *Scheduler_Name(void)
-{
-    return "EDF";
-}
-
 /* Called by each task body when a job finishes (task context).
- * Normally the task then blocks until its next release and nothing else
+ * Normally the task then blocks until its next release, and nothing else
  * is needed. If its next job has ALREADY been released (overload), the
  * task runs straight on into it with a new, later deadline, so the
  * manager must re-sort now rather than wait for the next release event. */
-void Scheduler_JobComplete(uint32_t id)
+void EDF_JobComplete(uint32_t id)
 {
     if (id >= NUM_TASKS) return;
 
@@ -226,16 +253,51 @@ void Scheduler_JobComplete(uint32_t id)
 
     if (edf_released[id] != edf_completed[id] && edf_manager != NULL)
     {
+        taskENTER_CRITICAL();
+        if (!edf_detect_pending) { edf_detect_pending = 1; edf_detect_cyc = DWT->CYCCNT; }
+        taskEXIT_CRITICAL();
         xTaskNotifyGive(edf_manager);
     }
 }
-void Scheduler_Init(void)
+
+/* Manager task's total CPU cycles so far (FreeRTOS run-time stats, which
+ * count only the time the manager itself was running, not interrupts or
+ * other tasks that preempted it). */
+static uint32_t EDF_ManagerRunTime(void)
+{
+    if (edf_manager == NULL) return 0;
+    TaskStatus_t st;
+    vTaskGetInfo(edf_manager, &st, pdFALSE, eRunning);
+    return st.ulRunTimeCounter;
+}
+
+/* Called by the reporter at the start of the measurement window: every
+ * overhead counter then covers exactly the window, nothing from boot. */
+void EDF_WindowBegin(void)
+{
+    uint32_t rt = EDF_ManagerRunTime();
+    taskENTER_CRITICAL();
+    edf_hook_calls = edf_hook_acc = edf_hook_max = 0;
+    edf_release_events = 0;
+    edf_recompute_count = edf_recompute_acc = edf_recompute_max = 0;
+    edf_prio_writes = 0;
+    edf_upd_n = 0; edf_upd_acc = 0; edf_upd_max = 0;
+    for (uint32_t b = 0; b < UPD_BINS; b++) edf_upd_hist[b] = 0;
+    edf_mgr_rt0 = rt;
+    taskEXIT_CRITICAL();
+}
+
+uint32_t EDF_ManagerCpuCycles(void)
+{
+    return EDF_ManagerRunTime() - edf_mgr_rt0;
+}
+void EDF_Init(void)
 {
     for (uint32_t i = 0; i < NUM_TASKS; i++)
     {
         edf_period_ticks[i]   = pdMS_TO_TICKS(task_set[i].period_ms);
         edf_deadline_ticks[i] = pdMS_TO_TICKS(task_set[i].deadline_ms);
-        edf_next_release[i]   = EDF_BASE_TICK;
+        edf_next_release[i]   = EDF_BASE_TICK + pdMS_TO_TICKS(task_offset_ms[i]);
         edf_released[i]       = 0;
         edf_completed[i]      = 0;
     }
@@ -254,7 +316,7 @@ void Scheduler_Init(void)
 
         BaseType_t ok = xTaskCreate(body,
                                     task_set[i].name,
-                                    TASK_STACK_WORDS,
+                                    TASK_STACK_FOR(i),
                                     (void *)(uint32_t)i,
                                     start_prio,
                                     &edf_task[i]);
@@ -291,7 +353,7 @@ void Scheduler_Init(void)
                 (unsigned)(EDF_BASE_PRIORITY + NUM_TASKS - 1u));
 }
 
-void Scheduler_PrintOverhead(void)
+void EDF_PrintOverhead(void)
 {
     uint32_t c = edf_hook_calls, r = edf_recompute_count;
 
@@ -309,4 +371,3 @@ void Scheduler_PrintOverhead(void)
                 (unsigned long)edf_prio_writes);
 }
 
-#endif /* ACTIVE_SCHEDULER == SCHED_EDF */

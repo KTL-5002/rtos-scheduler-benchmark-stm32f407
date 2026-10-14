@@ -1,22 +1,20 @@
 #include "task_config.h"
 
-#if ACTIVE_SCHEDULER == SCHED_DMS
-
 #include "scheduler.h"
 #include "task_bodies.h"
 #include "uart.h"
 #include "FreeRTOS.h"
 #include "task.h"
 
-static TaskHandle_t task_handles[NUM_TASKS];
+static TaskHandle_t task_handles[MAX_TASKS];
 
 /* Lowest priority given to a real task. The reporter sits below this. */
 #define DMS_BASE_PRIORITY   2
 
-void Scheduler_Init(void)
+void DMS_Init(void)
 {
 	UART_Printf("\r\nscheduler=%s  built %s %s\r\n", Scheduler_Name(), __DATE__, __TIME__);
-    uint8_t order[NUM_TASKS];
+    uint8_t order[MAX_TASKS];
 
     for (uint8_t i = 0; i < NUM_TASKS; i++) order[i] = i;
 
@@ -48,7 +46,7 @@ void Scheduler_Init(void)
         BaseType_t ok = xTaskCreate(
             body,
             task_set[id].name,
-            TASK_STACK_WORDS,
+            TASK_STACK_FOR(id),
             (void *)(uint32_t)id,
             prio,
             &task_handles[id]
@@ -65,10 +63,10 @@ void Scheduler_Init(void)
     }
     UART_Print("-------------------------------\r\n\r\n");
 }
-void        vApplicationTickHook(void)  { }
-TickType_t  Scheduler_GetBaseTick(void) { return (TickType_t)RELEASE_START_TICK; }
-const char *Scheduler_Name(void)        { return "DMS"; }
-void        Scheduler_PrintOverhead(void) { UART_Printf("--- DMS: no scheduler overhead ---\r\n"); }
-void Scheduler_JobComplete(uint32_t id) { (void)id; }
+/* DMS needs no runtime scheduler work: FreeRTOS's own fixed-priority
+   scheduler does everything. Nothing to report. */
+void DMS_PrintOverhead(void)
+{
+    UART_Printf("--- DMS: no scheduler overhead ---\r\n");
+}
 
-#endif /* ACTIVE_SCHEDULER == SCHED_DMS */

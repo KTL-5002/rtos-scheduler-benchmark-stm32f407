@@ -172,6 +172,22 @@ standard names. */
 /* USER CODE BEGIN Defines */
 #undef  configTICK_RATE_HZ
 #define configTICK_RATE_HZ                       ((TickType_t)10000)
+
+/* RTOS benchmark: up to 50 tasks need ~64 KB of FreeRTOS heap */
+#undef  configTOTAL_HEAP_SIZE
+#define configTOTAL_HEAP_SIZE                    ((size_t)(80 * 1024))
+
+/* RTOS benchmark: run-time stats on the DWT cycle counter (CPU utilization,
+   EDF manager CPU time). DWT is started in main() before the scheduler. */
+#undef  configGENERATE_RUN_TIME_STATS
+#define configGENERATE_RUN_TIME_STATS            1
+#undef  INCLUDE_xTaskGetIdleTaskHandle
+#define INCLUDE_xTaskGetIdleTaskHandle           1
+#if defined(__GNUC__)
+extern uint32_t Metrics_RunTimeCounter(void);
+#endif
+#define portCONFIGURE_TIMER_FOR_RUN_TIME_STATS()
+#define portGET_RUN_TIME_COUNTER_VALUE()         Metrics_RunTimeCounter()
 /* Section where parameter definitions can be added (for instance, to override default ones in FreeRTOS.h) */
 /* USER CODE END Defines */
 

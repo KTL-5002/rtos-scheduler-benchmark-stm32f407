@@ -47,19 +47,35 @@ static const uint8_t  SWEEP_OBS[]    = { 0 };
 static const uint8_t  SWEEP_OUTER[]  = { 0 };                   /* set A */
 static const uint16_t SWEEP_U[]      = { 600, 800, 900, 1000 };
 static const uint8_t  SWEEP_OBS[]    = { 0, 1 };
+#elif SWEEP_EXPERIMENT == 4
+/* ---- Experiment 4: repeatability ----
+   The points where experiment 2 showed EDF collapsing in some trials but
+   not others. Each is run SWEEP_REPEATS times with EVERYTHING identical
+   (generated task set for N, target U, offset seed, scheduler), to show
+   whether the outcome is reproducible. */
+typedef struct { uint8_t n; uint16_t u_permille; uint8_t seed; } RepPoint_t;
+static const RepPoint_t REP_POINTS[] = {
+    { 50, 700, 1 },     /* exp 2: EDF 3.6 % adherence with seed 1, 100 % with seeds 0, 2 */
+    { 35, 800, 1 },     /* exp 2: EDF 5 % with seeds 1, 2; 100 % with seed 0 */
+};
+#define N_POINTS  (sizeof(REP_POINTS) / sizeof(REP_POINTS[0]))
 #else
-#error "SWEEP_EXPERIMENT must be 1, 2 or 3"
+#error "SWEEP_EXPERIMENT must be 1, 2, 3 or 4"
 #endif
 
 /* Schedulers, in the order they run for each point. */
 static const uint8_t SWEEP_SCHEDS[] = { SCHED_DMS, SCHED_EDF };
 
 #define COUNT(a)  (sizeof(a) / sizeof((a)[0]))
+#define N_SCHEDS  COUNT(SWEEP_SCHEDS)
+#if SWEEP_EXPERIMENT == 4
+#define N_RUNS    (N_POINTS * N_SCHEDS * SWEEP_REPEATS)
+#else
 #define N_OUTER   COUNT(SWEEP_OUTER)
 #define N_U       COUNT(SWEEP_U)
-#define N_SCHEDS  COUNT(SWEEP_SCHEDS)
 #define N_OBS     COUNT(SWEEP_OBS)
 #define N_RUNS    (N_OUTER * N_U * N_SCHEDS * N_OBS * SWEEP_TRIALS)
+#endif
 
 /* ================================================== state surviving reset */
 
@@ -82,7 +98,8 @@ static uint32_t     log_bytes_noted, log_records_noted;
 static uint32_t BuildId(void)
 {
     const char *s = __DATE__ " " __TIME__ " " FW_VERSION;
-    uint32_t h = 2166136261u ^ (uint32_t)SWEEP_EXPERIMENT ^ ((uint32_t)SWEEP_TRIALS << 8);
+    uint32_t h = 2166136261u ^ (uint32_t)SWEEP_EXPERIMENT ^ ((uint32_t)SWEEP_TRIALS << 8)
+                             ^ ((uint32_t)SWEEP_REPEATS << 16);
     while (*s) { h ^= (uint8_t)*s++; h *= 16777619u; }                       /* FNV-1a */
     return h;
 }
@@ -107,31 +124,52 @@ SweepPoint_t Sweep_Begin(void)
         sweep_state.magic = SWEEP_MAGIC;
         sweep_state.build = build;
         sweep_state.index = 0;
+      #if SWEEP_EXPERIMENT == 4
+        UART_Printf("\r\n##### NEW SWEEP, experiment 4: %lu runs "
+                    "(%lu points x %lu sched x %lu identical repeats) #####\r\n",
+                    (unsigned long)N_RUNS, (unsigned long)N_POINTS,
+                    (unsigned long)N_SCHEDS, (unsigned long)SWEEP_REPEATS);
+      #else
         UART_Printf("\r\n##### NEW SWEEP, experiment %lu: %lu runs "
                     "(%lu x %lu U x %lu sched x %lu logging x %lu trials) #####\r\n",
                     (unsigned long)SWEEP_EXPERIMENT, (unsigned long)N_RUNS,
                     (unsigned long)N_OUTER, (unsigned long)N_U, (unsigned long)N_SCHEDS,
                     (unsigned long)N_OBS, (unsigned long)SWEEP_TRIALS);
+      #endif
     }
 
+    uint32_t k = sweep_state.index;
+    current.run        = k;
+    current.total      = N_RUNS;
+    current.experiment = SWEEP_EXPERIMENT;
+
+  #if SWEEP_EXPERIMENT == 4
+    /* index -> (point, sched, rep); rep varies fastest */
+    current.rep   = k % SWEEP_REPEATS;          k /= SWEEP_REPEATS;
+    current.sched = SWEEP_SCHEDS[k % N_SCHEDS]; k /= N_SCHEDS;
+    const RepPoint_t *rp = &REP_POINTS[k];
+    current.obs        = 0;
+    current.trial      = rp->seed;
+    current.u_permille = rp->u_permille;
+    current.set        = 0;
+    TaskSet_Generate(rp->n);
+  #else
     /* index -> (outer, U, sched, obs, trial); trial varies fastest, so the
        DMS and EDF trials of one point sit next to each other in the log */
-    uint32_t k = sweep_state.index;
-    current.run   = k;
-    current.total = N_RUNS;
+    current.rep   = 0;
     current.trial = k % SWEEP_TRIALS;           k /= SWEEP_TRIALS;
     current.obs   = SWEEP_OBS[k % N_OBS];       k /= N_OBS;
     current.sched = SWEEP_SCHEDS[k % N_SCHEDS]; k /= N_SCHEDS;
     current.u_permille = SWEEP_U[k % N_U];      k /= N_U;
     uint32_t outer = SWEEP_OUTER[k];
-    current.experiment = SWEEP_EXPERIMENT;
 
-  #if SWEEP_EXPERIMENT == 2
+    #if SWEEP_EXPERIMENT == 2
     current.set = 0;
     TaskSet_Generate(outer);
-  #else
+    #else
     current.set = outer;
     TaskSet_Select(outer);
+    #endif
   #endif
 #else
     current.experiment = 0;
@@ -141,6 +179,7 @@ SweepPoint_t Sweep_Begin(void)
     current.u_permille = MANUAL_U_PERMILLE;
     current.set        = MANUAL_SET;
     current.trial      = MANUAL_TRIAL;
+    current.rep        = 0;
     current.obs        = MANUAL_OBS;
     if (MANUAL_N == 0) TaskSet_Select(MANUAL_SET);
     else               TaskSet_Generate(MANUAL_N);
@@ -155,8 +194,9 @@ SweepPoint_t Sweep_Begin(void)
                 (unsigned long)(current.run + 1), (unsigned long)current.total,
                 Scheduler_Name(), task_set_name, (unsigned long)current.n_tasks);
     PrintU(current.u_permille);
-    UART_Printf(", trial %lu%s%s #####\r\n", (unsigned long)current.trial,
+    UART_Printf(", seed %lu%s, repeat %lu%s #####\r\n", (unsigned long)current.trial,
                 current.trial ? " (random offsets)" : " (synchronous)",
+                (unsigned long)current.rep,
                 current.obs ? ", INTRUSIVE LOGGING" : "");
 
     return current;
@@ -178,26 +218,27 @@ void Sweep_RunDone(uint32_t window_ms, uint32_t idle_count, uint32_t cpu_x100)
     const char *sch = Scheduler_Name();
     const char *set = task_set_name;
     const unsigned long run = current.run, upm = current.u_permille;
-    const unsigned long tr = current.trial, obs = current.obs;
+    const unsigned long tr = current.trial, obs = current.obs, rep = current.rep;
 
     /* ---- provenance ---- */
     UART_Print("METAH,run,sched,set,u_permille,trial,obs,experiment,n_tasks,fw_version,git_commit,"
                "build_id,build_date,build_time,sysclk_hz,tick_hz,cyc_per_tick,window_ms,"
-               "trials,offset_seed,log_bytes,log_records\r\n");
-    UART_Printf("META,%lu,%s,%s,%lu,%lu,%lu,%lu,%lu,%s,%s,%08lx,%s,%s,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu\r\n",
+               "trials,offset_seed,log_bytes,log_records,rep,git_dirty,repeats\r\n");
+    UART_Printf("META,%lu,%s,%s,%lu,%lu,%lu,%lu,%lu,%s,%s,%08lx,%s,%s,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu\r\n",
                 run, sch, set, upm, tr, obs,
                 (unsigned long)current.experiment, (unsigned long)NUM_TASKS,
                 FW_VERSION, FW_GIT_COMMIT, (unsigned long)BuildId(), __DATE__, __TIME__,
                 (unsigned long)SystemCoreClock, (unsigned long)configTICK_RATE_HZ,
                 (unsigned long)(SysTick->LOAD + 1u), (unsigned long)window_ms,
                 (unsigned long)SWEEP_TRIALS, tr,
-                (unsigned long)log_bytes_noted, (unsigned long)log_records_noted);
+                (unsigned long)log_bytes_noted, (unsigned long)log_records_noted,
+                rep, (unsigned long)FW_GIT_DIRTY, (unsigned long)SWEEP_REPEATS);
 
     /* ---- per-task results ---- */
     UART_Print("CSVH,run,sched,set,u_permille,task,T_ms,D_ms,jobs,misses,"
                "max_us,min_us,due,done,unfinished,total_miss,idle,window_ms,"
                "experiment,n_tasks,mean_us,sd_us,start_mean_us,start_max_us,starts,cpu_x100,"
-               "trial,obs,offset_ms\r\n");
+               "trial,obs,offset_ms,rep\r\n");
     for (uint32_t i = 0; i < NUM_TASKS; i++) {
         uint32_t due  = TaskSet_Due(i, window_ms);
         uint32_t done = metrics[i].jobs;
@@ -205,7 +246,7 @@ void Sweep_RunDone(uint32_t window_ms, uint32_t idle_count, uint32_t cpu_x100)
         uint32_t mn   = (metrics[i].min_resp_us == 0xFFFFFFFFu) ? 0u : metrics[i].min_resp_us;
 
         UART_Printf("CSV,%lu,%s,%s,%lu,%s,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,"
-                    "%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu\r\n",
+                    "%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu\r\n",
                     run, sch, set, upm, task_set[i].name,
                     (unsigned long)task_set[i].period_ms, (unsigned long)task_set[i].deadline_ms,
                     (unsigned long)metrics[i].jobs, (unsigned long)metrics[i].misses,
@@ -217,18 +258,18 @@ void Sweep_RunDone(uint32_t window_ms, uint32_t idle_count, uint32_t cpu_x100)
                     (unsigned long)Metrics_MeanResp(i), (unsigned long)Metrics_SdResp(i),
                     (unsigned long)Metrics_MeanStart(i), (unsigned long)metrics[i].max_start_us,
                     (unsigned long)metrics[i].starts, (unsigned long)cpu_x100,
-                    tr, obs, (unsigned long)task_offset_ms[i]);
+                    tr, obs, (unsigned long)task_offset_ms[i], rep);
     }
 
     /* ---- per-task response-time histograms (R/D, percent bin edges) ---- */
-    UART_Print("HISTH,run,sched,set,u_permille,trial,obs,task,D_ms");
+    UART_Print("HISTH,run,sched,set,u_permille,trial,obs,rep,task,D_ms");
     for (uint32_t b = 0; b < RESP_BINS; b++) {
         if (b == RESP_BINS - 1) UART_Printf(",ge%u", (unsigned)RESP_BIN_EDGES[b - 1]);
         else                    UART_Printf(",lt%u", (unsigned)RESP_BIN_EDGES[b]);
     }
     UART_Print("\r\n");
     for (uint32_t i = 0; i < NUM_TASKS; i++) {
-        UART_Printf("HIST,%lu,%s,%s,%lu,%lu,%lu,%s,%lu", run, sch, set, upm, tr, obs,
+        UART_Printf("HIST,%lu,%s,%s,%lu,%lu,%lu,%lu,%s,%lu", run, sch, set, upm, tr, obs, rep,
                     task_set[i].name, (unsigned long)task_set[i].deadline_ms);
         for (uint32_t b = 0; b < RESP_BINS; b++)
             UART_Printf(",%lu", (unsigned long)metrics[i].hist[b]);
@@ -241,8 +282,8 @@ void Sweep_RunDone(uint32_t window_ms, uint32_t idle_count, uint32_t cpu_x100)
     uint32_t un = edf ? edf_upd_n : 0;
     UART_Print("OVHH,run,sched,set,u_permille,hook_n,hook_avg_cyc,hook_max_cyc,"
                "recomp_n,recomp_avg_cyc,recomp_max_cyc,releases,prio_writes,n_tasks,"
-               "trial,obs,mgr_cpu_cyc,upd_n,upd_avg_cyc,upd_max_cyc\r\n");
-    UART_Printf("OVH,%lu,%s,%s,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu\r\n",
+               "trial,obs,mgr_cpu_cyc,upd_n,upd_avg_cyc,upd_max_cyc,rep\r\n");
+    UART_Printf("OVH,%lu,%s,%s,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu\r\n",
                 run, sch, set, upm,
                 (unsigned long)hc,
                 (unsigned long)(hc ? edf_hook_acc / hc : 0),
@@ -256,15 +297,15 @@ void Sweep_RunDone(uint32_t window_ms, uint32_t idle_count, uint32_t cpu_x100)
                 (unsigned long)(edf ? EDF_ManagerCpuCycles() : 0),
                 (unsigned long)un,
                 (unsigned long)(un ? (uint32_t)(edf_upd_acc / un) : 0),
-                (unsigned long)(edf ? edf_upd_max : 0));
+                (unsigned long)(edf ? edf_upd_max : 0), rep);
 
-    UART_Print("UHISTH,run,sched,set,u_permille,trial,obs");
+    UART_Print("UHISTH,run,sched,set,u_permille,trial,obs,rep");
     for (uint32_t b = 0; b < UPD_BINS; b++) {
         if (b == UPD_BINS - 1) UART_Printf(",ge%uus", (unsigned)UPD_BIN_EDGES_US[b - 1]);
         else                   UART_Printf(",lt%uus", (unsigned)UPD_BIN_EDGES_US[b]);
     }
     UART_Print("\r\n");
-    UART_Printf("UHIST,%lu,%s,%s,%lu,%lu,%lu", run, sch, set, upm, tr, obs);
+    UART_Printf("UHIST,%lu,%s,%s,%lu,%lu,%lu,%lu", run, sch, set, upm, tr, obs, rep);
     for (uint32_t b = 0; b < UPD_BINS; b++)
         UART_Printf(",%lu", (unsigned long)(edf ? edf_upd_hist[b] : 0));
     UART_Print("\r\n");

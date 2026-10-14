@@ -98,7 +98,12 @@ void Metrics_RecordStart(uint32_t id, uint32_t release_cyc, uint32_t start_cyc)
 void Metrics_RecordCompletion(uint32_t id, uint32_t release_cyc, uint32_t done_cyc)
 {
     uint32_t cycles  = done_cyc - release_cyc;
-    uint32_t resp_us = cycles / (SystemCoreClock / 1000000U);
+    uint32_t resp_us = cycles / (SystemCoreClock / 1000000U);   /* for statistics only */
+
+    /* Deadline in CPU cycles: the miss test is exact to one cycle (6 ns),
+       not to a rounded-down microsecond. D <= 200 ms -> fits 32 bits. */
+    uint32_t d_cyc   = task_set[id].deadline_ms * (SystemCoreClock / 1000U);
+    int      missed  = (cycles > d_cyc);
 
     metrics[id].jobs++;
     metrics[id].last_resp_us   = resp_us;
@@ -114,11 +119,12 @@ void Metrics_RecordCompletion(uint32_t id, uint32_t release_cyc, uint32_t done_c
     while (b < RESP_BINS - 1 && pct >= RESP_BIN_EDGES[b]) b++;
     /* R == D exactly is a met deadline (miss means R > D): keep it in the
        last "met" bin so the histogram agrees with the miss counter */
-    if (resp_us <= task_set[id].deadline_ms * 1000U && b > 9) b = 9;
+    if (!missed && b > 9) b = 9;
+    if (missed  && b < 10) b = 10;                /* any overrun, however small */
     metrics[id].hist[b]++;
 
     /* Deadline miss: response time exceeded the relative deadline */
-    if (resp_us > (task_set[id].deadline_ms * 1000U)) {
+    if (missed) {
         metrics[id].misses++;
     }
 }

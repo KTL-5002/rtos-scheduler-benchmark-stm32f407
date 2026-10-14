@@ -15,6 +15,7 @@ TickType_t  Scheduler_GetBaseTick(void);
 void        Scheduler_PrintOverhead(void);
 void        Scheduler_JobComplete(uint32_t id);
 void        Scheduler_WindowBegin(void);        /* reset overhead counters at window start */
+void        Scheduler_WindowEnd(void);          /* freeze them at window end (before printing) */
 
 /* ---- implementations ---- */
 void DMS_Init(void);
@@ -25,6 +26,7 @@ void EDF_PrintOverhead(void);
 void EDF_JobComplete(uint32_t id);
 void EDF_TickHook(void);
 void EDF_WindowBegin(void);
+void EDF_WindowEnd(void);
 uint32_t EDF_ManagerCpuCycles(void);            /* manager CPU time in the window */
 
 /* EDF overhead counters (defined in scheduler_edf.c) */

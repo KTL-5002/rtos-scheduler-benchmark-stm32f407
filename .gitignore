@@ -28,3 +28,5 @@ data/raw/
 # OS junk
 Thumbs.db
 .DS_Store
+
+Core/Inc/git_version.h

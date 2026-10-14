@@ -174,13 +174,15 @@ void ReporterTaskBody(void *argument)
     /* Freeze. Nothing else runs from here on; UART_Printf is plain
        blocking HAL, so it is safe with the scheduler suspended. */
     vTaskSuspendAll();
+    Scheduler_WindowEnd();                     /* freeze scheduler counters BEFORE printing */
     uint32_t idle = idle_counter;
     uint32_t cpu  = Metrics_CpuEnd();          /* hundredths of a percent */
 
     const SweepPoint_t *pt = Sweep_Current();
-    UART_Printf("\r\n===== %s, set %s (%lu tasks), U=%lu.%lu%%, %lu ms window =====",
+    UART_Printf("\r\n===== %s, set %s (%lu tasks), U=%lu.%lu%%, seed %lu, repeat %lu, %lu ms window =====",
                 Scheduler_Name(), task_set_name, (unsigned long)NUM_TASKS,
                 (unsigned long)(pt->u_permille / 10), (unsigned long)(pt->u_permille % 10),
+                (unsigned long)pt->trial, (unsigned long)pt->rep,
                 (unsigned long)MEASURE_WINDOW_MS);
     Metrics_Print();
 

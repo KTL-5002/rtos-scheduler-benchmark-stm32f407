@@ -90,6 +90,14 @@ volatile uint32_t edf_upd_hist[UPD_BINS];   /* see UPD_BIN_EDGES_US */
 const uint16_t UPD_BIN_EDGES_US[UPD_BINS - 1] = { 2, 5, 10, 20, 50, 100, 200, 500, 1000 };
 
 static uint32_t edf_mgr_rt0 = 0;            /* manager run time at window start */
+static uint32_t edf_mgr_rt1 = 0;            /* manager run time at window end   */
+
+/* Set when the measurement window closes. FreeRTOS keeps calling the tick
+ * hook while the scheduler is suspended (the reporter prints with it
+ * suspended), so without this the hook counters would keep growing during
+ * printing. Once frozen the hook does nothing at all: no task can run any
+ * more, so there is nothing left to schedule. */
+static volatile uint8_t edf_frozen = 0;
 
 /* Bring-up stages — see notes. Enable one at a time.
  *   1 = DWT bracket only (measure bare hook cost)
@@ -103,6 +111,8 @@ static uint32_t edf_mgr_rt0 = 0;            /* manager run time at window start 
 
 void EDF_TickHook(void)
 {
+    if (edf_frozen) return;                 /* window closed: counters are final */
+
     uint32_t t0 = DWT->CYCCNT;
 
 #if EDF_STAGE >= 2
@@ -287,9 +297,17 @@ void EDF_WindowBegin(void)
     taskEXIT_CRITICAL();
 }
 
+/* Called by the reporter right after it suspends the scheduler at the end
+ * of the window: freezes every EDF counter before anything is printed. */
+void EDF_WindowEnd(void)
+{
+    edf_frozen  = 1;
+    edf_mgr_rt1 = EDF_ManagerRunTime();
+}
+
 uint32_t EDF_ManagerCpuCycles(void)
 {
-    return EDF_ManagerRunTime() - edf_mgr_rt0;
+    return (edf_frozen ? edf_mgr_rt1 : EDF_ManagerRunTime()) - edf_mgr_rt0;
 }
 void EDF_Init(void)
 {

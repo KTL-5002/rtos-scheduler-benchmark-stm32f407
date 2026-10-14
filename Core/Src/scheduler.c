@@ -57,6 +57,11 @@ void Scheduler_WindowBegin(void)
     if (active_sched == SCHED_EDF) EDF_WindowBegin();
 }
 
+void Scheduler_WindowEnd(void)
+{
+    if (active_sched == SCHED_EDF) EDF_WindowEnd();
+}
+
 /* FreeRTOS tick hook (configUSE_TICK_HOOK = 1). Only EDF does work here. */
 void vApplicationTickHook(void)
 {

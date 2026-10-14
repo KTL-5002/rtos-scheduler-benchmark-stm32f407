@@ -21,6 +21,10 @@
  *   2 = task count:  N = 5,10,20,35,50 x 8 U x DMS/EDF             (240 runs, ~50 min)
  *   3 = observer:    set A x U 60/80/90/100 x DMS/EDF x logging off/on
  *                                                                  ( 48 runs, ~10 min)
+ *   4 = repeatability: the critical points of experiment 2, each run
+ *       SWEEP_REPEATS times under IDENTICAL conditions (same task set, U,
+ *       offset seed and scheduler) - see REP_POINTS in sweep.c
+ *                                                    (2 pts x 2 sched x 10 = 40 runs, ~9 min)
  *
  * SWEEP_TRIALS: independent trials per point. Trial 0 releases every task
  * together (critical instant, worst case). Trial t >= 1 uses random per-task
@@ -30,13 +34,23 @@
  * SWEEP_ENABLE 0: a single manual run with the MANUAL_ values below.
  * ========================================================================= */
 #define SWEEP_ENABLE        1
-#define SWEEP_EXPERIMENT    2
-#define SWEEP_TRIALS        3
+#define SWEEP_EXPERIMENT    4
+#define SWEEP_TRIALS        3          /* experiments 1-3 */
+#define SWEEP_REPEATS       10         /* experiment 4: identical repeats per point */
 
-/* Firmware identification printed in every run's META line. Bump it when
-   you change the firmware, and/or paste the git commit you built from. */
-#define FW_VERSION          "v0.5-trials"
-#define FW_GIT_COMMIT       "unknown"
+/* Firmware identification printed in every run's META line. The git commit
+   and dirty flag come from git_version.h, which tools/stamp_git.py writes
+   before every build (CubeIDE pre-build step). */
+#define FW_VERSION          "v0.5.1"
+#if defined(__has_include)
+#  if __has_include("git_version.h")
+#    include "git_version.h"
+#  endif
+#endif
+#ifndef FW_GIT_COMMIT
+#  define FW_GIT_COMMIT     "unknown"   /* pre-build step not set up */
+#  define FW_GIT_DIRTY      1
+#endif
 
 #define MANUAL_SCHED        SCHED_DMS
 #define MANUAL_N            0          /* 0 = fixed set MANUAL_SET; 5..50 = generated set */
@@ -53,7 +67,8 @@ typedef struct {
     uint32_t set;           /* fixed task set index (experiments 1, 3) */
     uint32_t n_tasks;       /* task count of this run */
     uint32_t u_permille;    /* target utilization x1000 */
-    uint32_t trial;         /* 0 .. SWEEP_TRIALS-1; also the offset seed */
+    uint32_t trial;         /* the offset seed: 0 = synchronous release */
+    uint32_t rep;           /* identical repeat number (experiment 4), else 0 */
     uint32_t obs;           /* 1 = intrusive logging variant */
     float    u;             /* target utilization as a fraction */
 } SweepPoint_t;

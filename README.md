@@ -254,8 +254,3 @@ Peripheral changes go through the `.ioc` and regeneration — never by hand-edit
 ## Environment
 
 STM32CubeIDE 2.1.1 · FreeRTOS 10.3.1 (CMSIS-OS v2) · Python 3 with pandas and matplotlib · PuTTY at 115200 baud
-
-## References
-
-- Zhang & Li, AICCONF 2025 — task-load comparison of real-time schedulers (5–50 tasks; response time, deadline adherence, CPU utilization).
-- Peripheral bring-up reports for USART2, DC motor, USER button, LIS3DSH and the 16×2 I²C LCD, including SPI mode troubleshooting and the float-printf linker fix.
